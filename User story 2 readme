@@ -1,0 +1,210 @@
+# KYC Restricted Token - Technical Documentation
+
+## Overview
+
+The KYC Restricted Token is an ERC-721 compliant NFT smart contract with additional KYC (Know Your Customer) verification requirements. This contract implements a multi-signature governance mechanism to manage a KYC allowlist, ensuring that only verified addresses can hold or receive tokens. The contract includes UUPS upgradability pattern, making it possible to upgrade the contract logic without changing the contract address or migrating tokens.
+
+## Key Features
+
+1. **KYC Verification**: Transfers are restricted to addresses that have been verified and added to an allowlist.
+2. **Multi-Signature Governance**: Additions and removals from the KYC allowlist require multiple confirmations from authorized owners.
+3. **Upgradability**: Implements the UUPS (Universal Upgradeable Proxy Standard) pattern for future upgrades.
+4. **Security**: Includes reentrancy protection and comprehensive error handling.
+5. **Flexible Ownership**: Allows for addition and removal of multi-signature owners.
+
+## Contract Inheritance
+
+The contract inherits from several OpenZeppelin contracts:
+
+- `Initializable`: Handles initialization logic for upgradeable contracts
+- `ERC721Upgradeable`: Base implementation of the ERC-721 standard
+- `UUPSUpgradeable`: Implementation of the UUPS upgradeable pattern
+- `OwnableUpgradeable`: Access control mechanism that grants exclusive access to specific functions
+- `ReentrancyGuardUpgradeable`: Protection against reentrancy attacks
+
+## Core Components
+
+### KYC Allowlist
+
+The contract maintains a mapping of addresses that have been KYC verified:
+
+```solidity
+mapping(address => bool) private _kycAllowlist;
+```
+
+### Multi-Signature Mechanism
+
+The multi-signature functionality is implemented using:
+
+- **Owners List**: A list of addresses authorized to propose and confirm transactions
+  ```solidity
+  address[] public owners;
+  mapping(address => bool) public isOwner;
+  ```
+
+- **Transaction Structure**: Represents a request to add or remove an address from the allowlist
+  ```solidity
+  struct Transaction {
+      address target;
+      bool isAddition; // true for adding to allowlist, false for removal
+      bool executed;
+      uint256 confirmations;
+  }
+  ```
+
+- **Confirmation Tracking**: Maps transaction IDs to owner confirmations
+  ```solidity
+  mapping(uint256 => mapping(address => bool)) public confirmed;
+  ```
+
+## Key Functions
+
+### Initialization
+
+The contract is initialized (rather than using a constructor) to support upgradability:
+
+```solidity
+function initialize(
+    string memory _name,
+    string memory _symbol,
+    address[] memory _owners,
+    uint256 _requiredConfirmations
+) public initializer
+```
+
+This sets up the token name, symbol, multi-signature owners, and required confirmations.
+
+### Multi-Signature Management
+
+- **Submit Transaction**: Proposes an address to be added to or removed from the allowlist
+  ```solidity
+  function submitTransaction(address _target, bool _isAddition) public onlyMultiSigOwner returns (uint256 txIndex)
+  ```
+
+- **Confirm Transaction**: Allows an owner to confirm a proposed transaction
+  ```solidity
+  function confirmTransaction(uint256 _txIndex) public onlyMultiSigOwner
+  ```
+
+- **Revoke Confirmation**: Allows an owner to withdraw their confirmation
+  ```solidity
+  function revokeConfirmation(uint256 _txIndex) public onlyMultiSigOwner
+  ```
+
+- **Execute Transaction**: Finalizes a transaction once it has received sufficient confirmations
+  ```solidity
+  function executeTransaction(uint256 _txIndex) public nonReentrant
+  ```
+
+### Owner Management
+
+- **Add Owner**: Adds a new address to the multi-signature owner list
+  ```solidity
+  function addOwner(address _owner) public onlyAllowlistManager
+  ```
+
+- **Remove Owner**: Removes an address from the multi-signature owner list
+  ```solidity
+  function removeOwner(address _owner) public onlyAllowlistManager
+  ```
+
+- **Change Required Confirmations**: Updates the number of confirmations needed
+  ```solidity
+  function changeRequiredConfirmations(uint256 _requiredConfirmations) public onlyAllowlistManager
+  ```
+
+### Token Transfers and KYC Verification
+
+The contract overrides the token transfer logic to ensure KYC verification:
+
+```solidity
+function _update(
+    address to,
+    uint256 tokenId,
+    address auth
+) internal virtual override returns (address)
+```
+
+This function enforces that token recipients must be KYC verified by checking the allowlist.
+
+### Token Minting
+
+- **Mint**: Creates a new token for a KYC-verified address
+  ```solidity
+  function mint(address to, uint256 tokenId) public onlyOwner
+  ```
+
+- **Batch Mint**: Creates multiple tokens for a KYC-verified address
+  ```solidity
+  function batchMint(address to, uint256[] memory tokenIds) public onlyOwner
+  ```
+
+## Events
+
+The contract emits events for key actions:
+
+- `AllowlistUpdated`: When an address is added to or removed from the allowlist
+- `TransactionSubmitted`: When a new transaction is proposed
+- `TransactionConfirmed`: When an owner confirms a transaction
+- `TransactionExecuted`: When a transaction receives enough confirmations and executes
+- `OwnerAdded`: When a new multi-signature owner is added
+- `OwnerRemoved`: When a multi-signature owner is removed
+- `AllowlistManagerUpdated`: When the allowlist manager address changes
+
+## Error Handling
+
+The contract uses custom errors for clarity and gas efficiency:
+
+- `NotKYCVerified`: When a non-verified address attempts to receive tokens
+- `NotAuthorized`: When an unauthorized address attempts a restricted action
+- `TransactionAlreadyExecuted`: When attempting to modify an already executed transaction
+- `InsufficientConfirmations`: When a transaction lacks enough confirmations
+- `InvalidTransactionId`: When referencing a non-existent transaction
+- And others for various validation failures
+
+## Upgradability
+
+The contract implements the UUPS upgradability pattern:
+
+```solidity
+function _authorizeUpgrade(address newImplementation) internal override onlyOwner
+```
+
+This allows the contract owner to upgrade the implementation while preserving the contract's state and address.
+
+## Security Considerations
+
+1. **KYC Verification**: Transfers to non-verified addresses are blocked
+2. **Reentrancy Protection**: Uses the ReentrancyGuard for functions that could be vulnerable
+3. **Multi-Signature Governance**: Requires multiple confirmations for critical operations
+4. **Error Handling**: Uses custom errors to clearly identify failure conditions
+5. **Access Control**: Uses modifiers to restrict function access
+
+## Usage Flow
+
+1. **Contract Deployment**:
+   - Deploy the implementation contract
+   - Deploy a proxy pointing to the implementation
+   - Initialize the proxy with token details and multi-signature owners
+
+2. **KYC Management**:
+   - An owner submits a transaction to add an address to the allowlist
+   - Other owners confirm the transaction
+   - Once enough confirmations are received, the address is added to the allowlist
+
+3. **Token Operations**:
+   - Tokens can be minted to KYC-verified addresses
+   - Tokens can be transferred between KYC-verified addresses
+   - Attempts to transfer to non-verified addresses will revert
+
+4. **Governance Updates**:
+   - Owners can be added or removed through the multi-signature process
+   - The required confirmation threshold can be adjusted
+   - The contract implementation can be upgraded by the contract owner
+
+## Code Maintenance Notes
+
+The contract originally contained a legacy `_beforeTokenTransfer` function with an unused parameter that was removed. In newer versions of OpenZeppelin's ERC721, the token transfer logic has been moved to the `_update` function, which this contract correctly overrides.
+
+
+# Address `0x9340DA78eC04aD53CFbD6970D7F6C2A0a33cD42a`
